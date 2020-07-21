@@ -1,3 +1,3 @@
-# interpreters
+# Python practice: interpreters
 
-Practice makes perfect so let's try to write interpreters in Python
+Practice supposedly makes perfect so let's try to write interpreters in Python.

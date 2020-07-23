@@ -82,7 +82,7 @@ class Program:
 class BrainfuckVM:
     def __init__(self, code=None, bits=8):
         self.bits = bits
-        self.memory = Memory(cell_size_bits=bits)
+        self.memory = Memory(bits)
         self.in_stream = InStream()
         self.out_stream = OutStream()
         self.program = Program(code) if code else None
@@ -130,7 +130,7 @@ class BrainfuckVM:
         self.OPCODES[opcode]()
 
     def reset(self, code=None):
-        self.memory = Memory(cell_size_bits=self.bits)
+        self.memory = Memory(self.bits)
         self.in_stream = InStream()
         self.out_stream = OutStream()
         self.program = Program(code) if code else None

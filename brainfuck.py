@@ -2,10 +2,10 @@ import sys
 from collections import defaultdict, deque
 
 
-class Memory():
+class Memory:
     def __init__(self, cell_size_bits=8):
-        self.registers = defaultdict(int)  # "unlimited" number of cells, each with one unsigned byte:
-        self.cell_size = 2 ** cell_size_bits
+        self.registers = defaultdict(int)  # "unlimited" number of cells
+        self.cell_size = 2 ** cell_size_bits # default setting: one unsigned byte per cell
         self.data_ptr = 0
 
     def move(self, n):
@@ -24,24 +24,25 @@ class Memory():
         return self.registers[self.data_ptr]
 
 
-class InStream():
+class InStream:
     def __init__(self):
         self.buffer = deque()
 
+    def add(self, inp):
+        for val in list(inp):
+            self.buffer.append(val)
+
     def get(self):
-        return self.buffer.popleft()
+        return self.buffer.popleft() if self.buffer else None
 
 
-class OutStream():
-    def __init__(self):
-        pass
-
+class OutStream:
     def put(self, val):
-        sys.stdout.write(val)
+        sys.stdout.write(chr(val))
         sys.stdout.flush()
 
 
-class Program():
+class Program:
     def __init__(self, code=None):
         self.code = code
         self.i_ptr = 0
@@ -58,12 +59,6 @@ class Program():
                 jump_table[jump_table[i]] = i
         return jump_table
 
-    def advance(self):
-        self.i_ptr += 1
-
-    def current(self):
-        return self.i_ptr
-
     def load_code(self, code):
         self.code = code
         self.jump_table = self.__calculate_jump_table()
@@ -71,14 +66,20 @@ class Program():
     def get_opcode(self):
         return self.code[self.i_ptr]
 
-    def update_pointer(self):
+    def current(self):
+        return self.i_ptr
+
+    def advance(self):
+        self.i_ptr += 1
+
+    def jump(self):
         self.i_ptr = self.jump_table[self.i_ptr]
 
     def eof(self):
         return self.i_ptr >= len(self.code)
 
 
-class BrainfuckVM():
+class BrainfuckVM:
     def __init__(self, code=None):
         self.memory = Memory()
         self.in_stream = InStream()
@@ -109,19 +110,20 @@ class BrainfuckVM():
         self.memory.decrement()
 
     def __input_value(self):
-        if self.in_stream.buffer:
-            self.memory.store(self.in_stream.get())
+        value = self.in_stream.get()
+        if value:
+            self.memory.store(value)
 
     def __output_value(self):
-        self.out_stream.put(chr(self.memory.get_current()))
+        self.out_stream.put(self.memory.get_current())
 
     def __jump_if_zero(self):
         if not self.memory.get_current():
-            self.program.update_pointer()
+            self.program.jump()
 
     def __jump_if_not_zero(self):
         if self.memory.get_current():
-            self.program.update_pointer()
+            self.program.jump()
 
     def __exec_opcode(self, opcode):
         self.OPCODES[opcode]()
@@ -136,8 +138,7 @@ class BrainfuckVM():
         self.program = Program(code)
 
     def load_input(self, inp):
-        for a in list(inp):
-            self.in_stream.buffer.append(a)
+        self.in_stream.add(inp)
 
     def run_program(self):
         while not self.program.eof():
@@ -152,7 +153,7 @@ if __name__ == "__main__":
 
     VM = BrainfuckVM()
 
-    print("\nTEST 1: Hello world!" + "\n" + 45 * "-")
+    print("\nTEST 1: print Hello world!" + "\n" + 45 * "-")
     code = '++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.'
     print("The code is: {}\n".format(code))
     VM.load_code(code)

@@ -3,7 +3,7 @@ from collections import defaultdict, deque
 
 
 class Memory:
-    def __init__(self, cell_size_bits=8):
+    def __init__(self, cell_size_bits):
         self.registers = defaultdict(int)  # "unlimited" number of cells
         self.cell_size = 2 ** cell_size_bits # default setting: one unsigned byte per cell
         self.data_ptr = 0
@@ -80,8 +80,9 @@ class Program:
 
 
 class BrainfuckVM:
-    def __init__(self, code=None):
-        self.memory = Memory()
+    def __init__(self, code=None, bits=8):
+        self.bits = bits
+        self.memory = Memory(cell_size_bits=bits)
         self.in_stream = InStream()
         self.out_stream = OutStream()
         self.program = Program(code) if code else None
@@ -129,7 +130,7 @@ class BrainfuckVM:
         self.OPCODES[opcode]()
 
     def reset(self, code=None):
-        self.memory = Memory()
+        self.memory = Memory(cell_size_bits=self.bits)
         self.in_stream = InStream()
         self.out_stream = OutStream()
         self.program = Program(code) if code else None

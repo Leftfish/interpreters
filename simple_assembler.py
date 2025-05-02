@@ -1,14 +1,14 @@
 ### TO DO:
-# parse_instruction when parse_code in Program class
-# verify labels only once, when parse_instruction happens
-# call and ret to implement
+# fib zle dziala # czasem sie zapetla - co jak jest call na callu? brakuje stosu :)
+# przecinek w output źle działa z powodu parsowania przez split ','
 
+import sys
 from collections import defaultdict
 
 class Memory:
     def __init__(self):
         self.registers = defaultdict(int)
-        self.return_value = -1
+        self.return_value = ['-1']
 
 class Operator:
     def __init__(self, name, args, interpreter):
@@ -70,30 +70,12 @@ class DEC(Operator):
         val = self.interpreter.memory.registers[target] - 1
         self.write(val, target)
 
-class MSG(Operator):
-    def get_params(self):
-        params = []
-        for arg in self.args:
-            if arg[0] == "'" and arg[-1] == "'":
-                params.append(arg[1:-1])
-            else:
-                params.append(str(self.interpreter.memory.registers[arg]))
-        return params
-
-    def execute(self):
-        params = self.get_params()
-        self.interpreter.memory.return_value = ''.join(params)
-
-class LABEL(Operator):
-    def execute(self):
-        pass
-
 class JumpOperator(Operator):
     def check_jump(self):
         raise NotImplementedError
 
     def execute(self):
-        target = self.interpreter.program.label_table[self.args[0]]
+        target = self.interpreter.program.label_table2[self.args[0]]
         if self.check_jump():
             self.interpreter.instruction_ptr = target
             self.interpreter.last_op_jmp = False
@@ -126,6 +108,16 @@ class JL(JumpOperator):
     def check_jump(self):
         return self.interpreter.last_cmp_second_greater
 
+class CALL(Operator):
+    def execute(self):
+        target = self.interpreter.program.label_table2[self.args[0]]
+        self.interpreter.last_call = self.interpreter.instruction_ptr
+        self.interpreter.instruction_ptr = target
+
+class RET(Operator):
+    def execute(self):
+        self.interpreter.instruction_ptr = self.interpreter.last_call
+
 class CMP(Operator):
     def get_params(self):
         left, right = self.args
@@ -148,10 +140,39 @@ class CMP(Operator):
             self.interpreter.last_cmp_first_greater = False
             self.interpreter.last_cmp_second_greater = True
 
+class MSG(Operator):
+    def get_params(self):
+        params = []
+        print(self.args)
+        res = []
+        stack = ''
+        collect = False
+        for char in self.args:
+            if char == "'" and not collect:
+                collect = True
+            elif char == "'" and collect:
+                collect = False
+                res.append(''.join(stack))
+                stack = []
+            elif collect:
+                stack += char
+            elif char not in ', ':
+                res.append(str(self.interpreter.memory.registers[char]))
+
+        params = res
+        return params
+
+    def execute(self):
+        params = self.get_params()
+        self.interpreter.memory.return_value = ''.join(params)
+
+class LABEL(Operator):
+    def execute(self):
+        pass
+
 class END(Operator):
     def execute(self):
         self.interpreter.running = False
-
 
 OP_DICTIONARY = {
         "mov": MOV,
@@ -169,24 +190,16 @@ OP_DICTIONARY = {
         "jg": JG,
         "jle": JLE,
         "jl": JL,
-        "call": None,
-        "ret": None,
+        "call": CALL,
+        "ret": RET,
         "msg": MSG,
         "end": END
         }
 
-
 class Program:
     def __init__(self, code, interpreter):
-        self.instructions = self.__parse_code(code)
-        self.label_table = self.__find_labels()
         self.interpreter = interpreter
         self.instructions2, self.label_table2 = self.other_parse_code(code)
-
-    def __parse_code(self, code: str) -> list[str]:
-        removed_comments = [line.split(';')[0].strip() for line in code.splitlines()]
-        lines = [line for line in removed_comments if line]
-        return lines
     
     def other_parse_code(self, code:str) -> list[Operator]:
         instructions = []
@@ -197,75 +210,41 @@ class Program:
         
         for ptr, line in enumerate(lines):
             if ':' in line:
-                name, args = 'label', []
+                name, args = line[:-1], []
                 instructions.append(LABEL(name, args, self.interpreter))
                 label_table[name] = ptr
-            elif line == 'end' or line == 'ret':
+            elif line == 'end' or line == 'ret' or line == 'call':
                 name, args = line, []
                 instructions.append(OP_DICTIONARY[name](name, args, self.interpreter))
+            elif line.startswith('msg'):
+                name, args = line.split(maxsplit=1)
+                instructions.append(OP_DICTIONARY[name](name, args, self.interpreter))        
             else:
                 name, args = line.split(maxsplit=1)
                 args = [arg.strip() for arg in args.split(',')]
                 instructions.append(OP_DICTIONARY[name](name, args, self.interpreter))
-        
         return instructions, label_table
-    
-    def __find_labels(self):
-        label_table = {}
-        for ptr, instruction in enumerate(self.instructions):
-            if ':' in instruction:
-                label_table[instruction.split(':')[0]] = ptr
-        return label_table
-
 
 class Interpreter:
     def __init__(self):
         self.memory = Memory()
         self.instruction_ptr = 0
         self.program = None
-        
-        
-        self.running = True
+        self.running = False
 
         self.last_cmp_equal = None
         self.last_cmp_first_greater = None
         self.last_cmp_second_greater = None
 
         self.last_op_jmp = False
+        self.last_call = None
 
     def load_code(self, code):
         self.program = Program(code, self)
 
-    def __parse_instruction(self, instruction):
-        if ':' in instruction:
-            name, args = 'label', []
-        elif instruction == 'end' or instruction == 'ret':
-            name, args = instruction, []
-        else:
-            name, args = instruction.split(maxsplit=1)
-            args = [arg.strip() for arg in args.split(',')]
-        return name, args
-
-    def naive_loop(self, debug=True):
-        while self.running:
-            try:
-                instruction = self.program.instructions[self.instruction_ptr]
-                name, args = self.__parse_instruction(instruction)
-                self.last_op_jmp = False
-
-                op = OP_DICTIONARY[name](name, args, self)
-                op.execute()
-
-                if debug: print(f'After executing {op}. \tRegisters: ' + str([f'{k}: {v}' for k, v in self.memory.registers.items()]))
-
-                if not self.last_op_jmp:
-                    self.instruction_ptr += 1
-
-            except IndexError:
-                self.running = False
-                print('Reached end of program without END instruction. Stopping.')
-
     def naive_loop2(self, debug=True):
+        self.running = True
+
         while self.running:
             try:
                 self.last_op_jmp = False
@@ -273,7 +252,7 @@ class Interpreter:
                 current_op = self.program.instructions2[self.instruction_ptr]
                 current_op.execute()
 
-                if debug: print(f'After executing {current_op}. \tRegisters: ' + str([f'{k}: {v}' for k, v in self.memory.registers.items()]))
+                if debug: print(f'After executing {current_op}. \tRegisters: ' + str([f'{k}: {v}' for k, v in self.memory.registers.items()]) + f'\t Return: {str(self.memory.return_value)}')
 
                 if not self.last_op_jmp:
                     self.instruction_ptr += 1
@@ -282,30 +261,44 @@ class Interpreter:
                 self.running = False
                 print('Reached end of program without END instruction. Stopping.')
 
-program = """
-; My first program
-mov  a, 5
-mov  b, 10
-add  a, 2
-sub  b, a
-mul  b, b
-mov  c, 18
-div  c, 3
-mul  a, c
-mul  b, c
-div  a, c
-cmp 3, 3
-jl test
-inc a
-inc b
-inc c
-dec a
-mul a, c
-div b, a
-test:
-msg a, '^', b, ' = to jakas bzdura', c, 'lol'
+program = """mov   a, 11           ; value1
+mov   b, 3            ; value2
+call  mod_func
+msg   'mod(', a, ', ', b, ') = ', d        ; output
 end
+
+; Mod function
+mod_func:
+    mov   c, a        ; temp1
+    div   c, b
+    mul   c, b
+    mov   d, a        ; temp2
+    sub   d, c
+    ret
 """
 i = Interpreter()
 i.load_code(program)
-i.naive_loop2(debug=True)
+i.naive_loop2(debug=False)
+print(''.join(i.memory.return_value))
+
+
+
+s = "'mod(', a, ', ', b, ') = ', d'"
+
+res = []
+stack = ''
+collect = False
+for char in s:
+    if char == "'" and not collect:
+        collect = True
+    elif char == "'" and collect:
+        collect = False
+        res.append(''.join(stack))
+        stack = []
+    elif collect:
+        stack += char
+    elif char not in ', ':
+        res.append(char)    
+
+
+# jak widzisz ' to otwórz i zbieraj wszystko, jak widzisz znowu ' to zamknij

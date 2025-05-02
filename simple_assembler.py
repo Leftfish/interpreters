@@ -1,6 +1,5 @@
 ### TO DO:
 # fib zle dziala # czasem sie zapetla - co jak jest call na callu? brakuje stosu :)
-# przecinek w output źle działa z powodu parsowania przez split ','
 
 import sys
 from collections import defaultdict
@@ -143,23 +142,28 @@ class CMP(Operator):
 class MSG(Operator):
     def get_params(self):
         params = []
-        print(self.args)
-        res = []
         stack = ''
-        collect = False
+        collect_literal = False
+        collect_register = False
         for char in self.args:
-            if char == "'" and not collect:
-                collect = True
-            elif char == "'" and collect:
-                collect = False
-                res.append(''.join(stack))
+            if char == "'" and not collect_literal:
+                collect_literal = True
+            elif char == "'" and collect_literal:
+                collect_literal = False
+                params.append(''.join(stack))
                 stack = []
-            elif collect:
+            elif char == "," and not collect_register and not collect_literal:
+                collect_register = True
+            elif char == "," and collect_register and not collect_literal:
+                collect_register = False
+                params.append(str(self.interpreter.memory.registers[''.join(stack)]))
+                stack = []
+            elif collect_register and char != " ":
                 stack += char
-            elif char not in ', ':
-                res.append(str(self.interpreter.memory.registers[char]))
-
-        params = res
+            elif collect_literal:
+                stack += char
+        if stack:
+            params.append(str(self.interpreter.memory.registers[''.join(stack)]))
         return params
 
     def execute(self):
@@ -242,7 +246,20 @@ class Interpreter:
     def load_code(self, code):
         self.program = Program(code, self)
 
-    def naive_loop2(self, debug=True):
+    def reset(self):
+        self.memory = Memory()
+        self.instruction_ptr = 0
+        self.program = None
+        self.running = False
+
+        self.last_cmp_equal = None
+        self.last_cmp_first_greater = None
+        self.last_cmp_second_greater = None
+
+        self.last_op_jmp = False
+        self.last_call = None
+
+    def run_program(self, debug=True):
         self.running = True
 
         while self.running:
@@ -276,29 +293,60 @@ mod_func:
     sub   d, c
     ret
 """
+
+
+program2 = '''mov   a, 81         ; value1
+mov   b, 153        ; value2
+call  init
+call  proc_gcd
+call  print
+end
+
+proc_gcd:
+    cmp   c, d
+    jne   loop
+    ret
+
+loop:
+    cmp   c, d
+    jg    a_bigger
+    jmp   b_bigger
+
+a_bigger:
+    sub   c, d
+    jmp   proc_gcd
+
+b_bigger:
+    sub   d, c
+    jmp   proc_gcd
+
+init:
+    cmp   a, 0
+    jl    a_abs
+    cmp   b, 0
+    jl    b_abs
+    mov   c, a            ; temp1
+    mov   d, b            ; temp2
+    ret
+
+a_abs:
+    mul   a, -1
+    jmp   init
+
+b_abs:
+    mul   b, -1
+    jmp   init
+
+print:
+    msg   'gcd(', a, ', ', b, ') = ', c
+    ret
+'''
 i = Interpreter()
 i.load_code(program)
-i.naive_loop2(debug=False)
+i.run_program(debug=False)
 print(''.join(i.memory.return_value))
 
-
-
-s = "'mod(', a, ', ', b, ') = ', d'"
-
-res = []
-stack = ''
-collect = False
-for char in s:
-    if char == "'" and not collect:
-        collect = True
-    elif char == "'" and collect:
-        collect = False
-        res.append(''.join(stack))
-        stack = []
-    elif collect:
-        stack += char
-    elif char not in ', ':
-        res.append(char)    
-
-
-# jak widzisz ' to otwórz i zbieraj wszystko, jak widzisz znowu ' to zamknij
+i.reset()
+i.load_code(program2)
+i.run_program(debug=False)
+print(''.join(i.memory.return_value))

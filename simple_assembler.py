@@ -1,11 +1,37 @@
-# functions for memory and output
-
 from collections import defaultdict
 
 class Memory:
     def __init__(self):
         self.registers = defaultdict(int)
         self.return_value = [-1]
+
+    def write(self, register, val):
+        self.registers[register] = val
+
+    def read(self, register):
+        return self.registers[register]
+
+    def write_output(self, value):
+        self.return_value = value
+
+    def read_output(self):
+        if len(self.return_value) == 1 and self.return_value[0] == -1:
+            return -1
+        else:
+            return ''.join(self.return_value)
+
+class CallStack:
+    def __init__(self):
+        self.ops = []
+
+    def put(self, op):
+        self.ops.append(op)
+
+    def pop(self):
+        return self.ops.pop()
+    
+    def is_empty(self):
+        return len(self.ops) == 0
 
 class Operator:
     def __init__(self, name, args, interpreter):
@@ -22,8 +48,8 @@ class Operator:
 class MathOperator(Operator):
     def get_params(self):
         left, right = self.args
-        a = int(left) if left.isnumeric() else self.interpreter.memory.registers[left]
-        b = int(right) if right.isnumeric() else self.interpreter.memory.registers[right]
+        a = int(left) if left.lstrip('+-').isdigit() else self.interpreter.memory.read(left)
+        b = int(right) if right.lstrip('+-').isdigit() else self.interpreter.memory.read(right)
         return a, b
 
     def calculate(self, a, b):
@@ -58,13 +84,13 @@ class DIV(MathOperator):
 class INC(Operator):
     def execute(self):
         target = self.args[0]
-        val = self.interpreter.memory.registers[target] + 1
+        val = self.interpreter.memory.read(target) + 1
         self.write(val, target)
 
 class DEC(Operator):
     def execute(self):
         target = self.args[0]
-        val = self.interpreter.memory.registers[target] - 1
+        val = self.interpreter.memory.read(target) - 1
         self.write(val, target)
 
 class JumpOperator(Operator):
@@ -75,7 +101,6 @@ class JumpOperator(Operator):
         target = self.interpreter.program.label_table[self.args[0]]
         if self.check_jump():
             self.interpreter.instruction_ptr = target
-            self.interpreter.last_op_jmp = False
 
 class JMP(JumpOperator):
     def check_jump(self):
@@ -108,18 +133,21 @@ class JL(JumpOperator):
 class CALL(Operator):
     def execute(self):
         target = self.interpreter.program.label_table[self.args[0]]
-        self.interpreter.call_stack.append(self.interpreter.instruction_ptr)
+        self.interpreter.call_stack.put(self.interpreter.instruction_ptr)
         self.interpreter.instruction_ptr = target
 
 class RET(Operator):
     def execute(self):
-        self.interpreter.instruction_ptr = self.interpreter.call_stack.pop()
+        if self.interpreter.call_stack.is_empty():
+            raise StopIteration
+        else:
+            self.interpreter.instruction_ptr = self.interpreter.call_stack.pop()
 
 class CMP(Operator):
     def get_params(self):
         left, right = self.args
-        a = int(left) if left.isnumeric() else self.interpreter.memory.registers[left]
-        b = int(right) if right.isnumeric() else self.interpreter.memory.registers[right]
+        a = int(left) if left.isnumeric() else self.interpreter.memory.read(left)
+        b = int(right) if right.isnumeric() else self.interpreter.memory.read(right)
         return a, b
 
     def execute(self):
@@ -165,7 +193,7 @@ class MSG(Operator):
 
     def execute(self):
         params = self.get_params()
-        self.interpreter.memory.return_value = ''.join(params)
+        self.interpreter.memory.write_output(''.join(params))
 
 class LABEL(Operator):
     def execute(self):
@@ -210,7 +238,7 @@ class Program:
         lines = [line for line in removed_comments if line]
 
         for ptr, line in enumerate(lines):
-            if line == 'end' or line == 'ret' or line == 'call':
+            if line == 'end' or line == 'ret':
                 name, args = line, []
                 instructions.append(OP_DICTIONARY[name](name, args, self.interpreter))
             elif line.startswith('msg'):
@@ -229,6 +257,8 @@ class Program:
 class Interpreter:
     def __init__(self):
         self.memory = Memory()
+        self.call_stack = CallStack()
+
         self.instruction_ptr = 0
         self.program = None
         self.running = False
@@ -236,15 +266,14 @@ class Interpreter:
         self.last_cmp_equal = None
         self.last_cmp_first_greater = None
         self.last_cmp_second_greater = None
-
-        self.last_op_jmp = False
-        self.call_stack = []
 
     def load_code(self, code):
         self.program = Program(code, self)
 
     def reset(self):
         self.memory = Memory()
+        self.call_stack = CallStack()
+
         self.instruction_ptr = 0
         self.program = None
         self.running = False
@@ -253,33 +282,25 @@ class Interpreter:
         self.last_cmp_first_greater = None
         self.last_cmp_second_greater = None
 
-        self.last_op_jmp = False
-        self.call_stack = []
-
-    def run_program(self, debug=True):
+    def run_program(self):
         self.running = True
 
         while self.running:
             try:
-                self.last_op_jmp = False
-
                 current_op = self.program.instructions[self.instruction_ptr]
                 current_op.execute()
-
-                if debug: print(f'After executing {current_op}. \tRegisters: ' +\
-                                 str([f'{k}: {v}' for k, v in self.memory.registers.items()]) +\
-                                      f'\t Stack: {str(self.call_stack)}')
-
-                if not self.last_op_jmp:
-                    self.instruction_ptr += 1
+                self.instruction_ptr += 1
 
             except IndexError:
-                if debug: print('Reached end of program without END instruction. Stopping.')
                 self.running = False
-                self.memory.return_value = [-1]
+                self.memory.write_output([-1])
+
+            except StopIteration:
+                self.memory.write_output([-1])
+        
+        return self.memory.read_output()
 
 TESTS = [
-    
 ("Any program...",
 '''
 ; My first program
@@ -293,7 +314,7 @@ function:
     div  a, 2
     ret
 ''', '(5+1)/2 = 3'),
-    
+
 
 ("Factorial",
 '''
@@ -461,9 +482,10 @@ def tests():
         print(f'Testing: {name}.')
         comp = Interpreter()
         comp.load_code(code)
-        comp.run_program(debug=False)
-        out = comp.memory.return_value
-        res = out[-1] if out[-1] == -1 else ''.join(out)
+        res = comp.run_program()
         print(f'Expected: {output} Got: {res}. Correct: {output == res}')
 
-tests()
+
+if __name__ == '__main__':
+    print("Hello, this is an interpreter of assembler written to solve a Codewars 2kyu task. Running tests now...", end ='\n\n')
+    tests()

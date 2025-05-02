@@ -1,10 +1,11 @@
+# functions for memory and output
 
 from collections import defaultdict
 
 class Memory:
     def __init__(self):
         self.registers = defaultdict(int)
-        self.return_value = ['-1']
+        self.return_value = [-1]
 
 class Operator:
     def __init__(self, name, args, interpreter):
@@ -199,9 +200,9 @@ OP_DICTIONARY = {
 class Program:
     def __init__(self, code, interpreter):
         self.interpreter = interpreter
-        self.instructions, self.label_table = self.other_parse_code(code)
+        self.instructions, self.label_table = self.__parse_code(code)
 
-    def other_parse_code(self, code:str) -> list[Operator]:
+    def __parse_code(self, code:str) -> list[Operator]:
         instructions = []
         label_table = {}
 
@@ -209,16 +210,16 @@ class Program:
         lines = [line for line in removed_comments if line]
 
         for ptr, line in enumerate(lines):
-            if ':' in line:
-                name, args = line[:-1], []
-                instructions.append(LABEL(name, args, self.interpreter))
-                label_table[name] = ptr
-            elif line == 'end' or line == 'ret' or line == 'call':
+            if line == 'end' or line == 'ret' or line == 'call':
                 name, args = line, []
                 instructions.append(OP_DICTIONARY[name](name, args, self.interpreter))
             elif line.startswith('msg'):
                 name, args = line.split(maxsplit=1)
                 instructions.append(OP_DICTIONARY[name](name, args, self.interpreter))
+            elif ':' in line:
+                name, args = line[:-1], []
+                instructions.append(LABEL(name, args, self.interpreter))
+                label_table[name] = ptr
             else:
                 name, args = line.split(maxsplit=1)
                 args = [arg.strip() for arg in args.split(',')]
@@ -275,7 +276,7 @@ class Interpreter:
             except IndexError:
                 if debug: print('Reached end of program without END instruction. Stopping.')
                 self.running = False
-                self.memory.return_value = ['-1']
+                self.memory.return_value = [-1]
 
 TESTS = [
     
@@ -454,13 +455,15 @@ print:
 ]
 
 def tests():
-    for test in (TESTS[2],):
+    for test in TESTS:
+        print('*' * 30)
         name, code, output = test
-        print(f'Testing program called {name}.')
+        print(f'Testing: {name}.')
         comp = Interpreter()
         comp.load_code(code)
-        comp.run_program(debug=True)
-        res = ''.join(comp.memory.return_value)
-        print(f'Expected: {output} Got: {res}. {output == res}')
+        comp.run_program(debug=False)
+        out = comp.memory.return_value
+        res = out[-1] if out[-1] == -1 else ''.join(out)
+        print(f'Expected: {output} Got: {res}. Correct: {output == res}')
 
 tests()

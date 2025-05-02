@@ -8,6 +8,7 @@ from collections import defaultdict
 class Memory:
     def __init__(self):
         self.registers = defaultdict(int)
+        self.return_value = -1
 
 class Operator:
     def __init__(self, name, args, interpreter):
@@ -81,7 +82,7 @@ class MSG(Operator):
 
     def execute(self):
         params = self.get_params()
-        self.interpreter.return_value = ''.join(params)
+        self.interpreter.memory.return_value = ''.join(params)
 
 class LABEL(Operator):
     def execute(self):
@@ -151,22 +152,6 @@ class END(Operator):
     def execute(self):
         self.interpreter.running = False
 
-class Program:
-    def __init__(self, code: str):
-        self.instructions = self.__parse_code(code)
-        self.label_table = self.__find_labels()
-
-    def __parse_code(self, code: str) -> list[str]:
-        removed_comments = [line.split(';')[0].strip() for line in code.splitlines()]
-        lines = [line for line in removed_comments if line]
-        return lines
-
-    def __find_labels(self):
-        label_table = {}
-        for ptr, instruction in enumerate(self.instructions):
-            if ':' in instruction:
-                label_table[instruction.split(':')[0]] = ptr
-        return label_table
 
 OP_DICTIONARY = {
         "mov": MOV,
@@ -176,7 +161,6 @@ OP_DICTIONARY = {
         "sub": SUB,
         "mul": MUL,
         "div": DIV,
-        "label": LABEL,
         "jmp": JMP,
         "cmp": CMP,
         "jne": JNE,
@@ -191,12 +175,55 @@ OP_DICTIONARY = {
         "end": END
         }
 
+
+class Program:
+    def __init__(self, code, interpreter):
+        self.instructions = self.__parse_code(code)
+        self.label_table = self.__find_labels()
+        self.interpreter = interpreter
+        self.instructions2, self.label_table2 = self.other_parse_code(code)
+
+    def __parse_code(self, code: str) -> list[str]:
+        removed_comments = [line.split(';')[0].strip() for line in code.splitlines()]
+        lines = [line for line in removed_comments if line]
+        return lines
+    
+    def other_parse_code(self, code:str) -> list[Operator]:
+        instructions = []
+        label_table = {}
+        
+        removed_comments = [line.split(';')[0].strip() for line in code.splitlines()]
+        lines = [line for line in removed_comments if line]
+        
+        for ptr, line in enumerate(lines):
+            if ':' in line:
+                name, args = 'label', []
+                instructions.append(LABEL(name, args, self.interpreter))
+                label_table[name] = ptr
+            elif line == 'end' or line == 'ret':
+                name, args = line, []
+                instructions.append(OP_DICTIONARY[name](name, args, self.interpreter))
+            else:
+                name, args = line.split(maxsplit=1)
+                args = [arg.strip() for arg in args.split(',')]
+                instructions.append(OP_DICTIONARY[name](name, args, self.interpreter))
+        
+        return instructions, label_table
+    
+    def __find_labels(self):
+        label_table = {}
+        for ptr, instruction in enumerate(self.instructions):
+            if ':' in instruction:
+                label_table[instruction.split(':')[0]] = ptr
+        return label_table
+
+
 class Interpreter:
     def __init__(self):
         self.memory = Memory()
         self.instruction_ptr = 0
         self.program = None
-        self.return_value = -1
+        
         
         self.running = True
 
@@ -207,7 +234,7 @@ class Interpreter:
         self.last_op_jmp = False
 
     def load_code(self, code):
-        self.program = Program(code)
+        self.program = Program(code, self)
 
     def __parse_instruction(self, instruction):
         if ':' in instruction:
@@ -224,7 +251,7 @@ class Interpreter:
             try:
                 instruction = self.program.instructions[self.instruction_ptr]
                 name, args = self.__parse_instruction(instruction)
-                self.last_operation_jump = False
+                self.last_op_jmp = False
 
                 op = OP_DICTIONARY[name](name, args, self)
                 op.execute()
@@ -238,19 +265,22 @@ class Interpreter:
                 self.running = False
                 print('Reached end of program without END instruction. Stopping.')
 
+    def naive_loop2(self, debug=True):
+        while self.running:
+            try:
+                self.last_op_jmp = False
 
-program = """
-; My first program
-mov  a, 5
-inc  a
-call function
-msg  '(5+1)/2 = ', a    ; output message
-end
+                current_op = self.program.instructions2[self.instruction_ptr]
+                current_op.execute()
 
-function:
-    div  a, 2
-    ret
-"""
+                if debug: print(f'After executing {current_op}. \tRegisters: ' + str([f'{k}: {v}' for k, v in self.memory.registers.items()]))
+
+                if not self.last_op_jmp:
+                    self.instruction_ptr += 1
+
+            except IndexError:
+                self.running = False
+                print('Reached end of program without END instruction. Stopping.')
 
 program = """
 ; My first program
@@ -264,7 +294,7 @@ div  c, 3
 mul  a, c
 mul  b, c
 div  a, c
-cmp 3, 4
+cmp 3, 3
 jl test
 inc a
 inc b
@@ -276,7 +306,6 @@ test:
 msg a, '^', b, ' = to jakas bzdura', c, 'lol'
 end
 """
-p = Program(program)
 i = Interpreter()
 i.load_code(program)
-i.naive_loop()
+i.naive_loop2(debug=True)

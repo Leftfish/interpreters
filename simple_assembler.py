@@ -1,6 +1,3 @@
-### TO DO:
-# fib zle dziala # czasem sie zapetla - co jak jest call na callu? brakuje stosu :)
-
 import sys
 from collections import defaultdict
 
@@ -110,12 +107,12 @@ class JL(JumpOperator):
 class CALL(Operator):
     def execute(self):
         target = self.interpreter.program.label_table2[self.args[0]]
-        self.interpreter.last_call = self.interpreter.instruction_ptr
+        self.interpreter.call_stack.append(self.interpreter.instruction_ptr)
         self.interpreter.instruction_ptr = target
 
 class RET(Operator):
     def execute(self):
-        self.interpreter.instruction_ptr = self.interpreter.last_call
+        self.interpreter.instruction_ptr = self.interpreter.call_stack.pop()
 
 class CMP(Operator):
     def get_params(self):
@@ -241,7 +238,7 @@ class Interpreter:
         self.last_cmp_second_greater = None
 
         self.last_op_jmp = False
-        self.last_call = None
+        self.call_stack = []
 
     def load_code(self, code):
         self.program = Program(code, self)
@@ -257,7 +254,7 @@ class Interpreter:
         self.last_cmp_second_greater = None
 
         self.last_op_jmp = False
-        self.last_call = None
+        self.call_stack = []
 
     def run_program(self, debug=True):
         self.running = True
@@ -341,12 +338,75 @@ print:
     msg   'gcd(', a, ', ', b, ') = ', c
     ret
 '''
-i = Interpreter()
-i.load_code(program)
-i.run_program(debug=False)
-print(''.join(i.memory.return_value))
 
-i.reset()
-i.load_code(program2)
-i.run_program(debug=False)
+program3 = '''
+mov   a, 5
+mov   b, a
+mov   c, a
+call  proc_fact
+call  print
+end
+
+proc_fact:
+    dec   b
+    mul   c, b
+    cmp   b, 1
+    jne   proc_fact
+    ret
+
+print:
+    msg   a, '! = ', c ; output text
+    ret
+'''
+
+fib = '''mov   a, 8            ; value
+mov   b, 0            ; next
+mov   c, 0            ; counter
+mov   d, 0            ; first
+mov   e, 1            ; second
+call  proc_fib
+call  print
+end
+
+proc_fib:
+    cmp   c, 2
+    jl    func_0
+    mov   b, d
+    add   b, e
+    mov   d, e
+    mov   e, b
+    inc   c
+    cmp   c, a
+    jle   proc_fib
+    ret
+
+func_0:
+    mov   b, c
+    inc   c
+    jmp   proc_fib
+
+print:
+    msg   'Term ', a, ' of Fibonacci series is: ', b        ; output text
+    ret
+
+'''
+
+fail = '''call  func1
+call  print
+end
+
+func1:
+    call  func2
+    ret
+
+func2:
+    ret
+
+print:
+    msg 'This program should return -1'
+'''
+
+i = Interpreter()
+i.load_code(fail)
+i.run_program(debug=True)
 print(''.join(i.memory.return_value))

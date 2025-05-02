@@ -1,4 +1,4 @@
-import sys
+
 from collections import defaultdict
 
 class Memory:
@@ -14,7 +14,7 @@ class Operator:
 
     def __repr__(self):
         return f'OP: {self.name} ARGS: {self.args}'
-    
+
     def write(self, val, target):
         self.interpreter.memory.registers[target] = val
 
@@ -71,7 +71,7 @@ class JumpOperator(Operator):
         raise NotImplementedError
 
     def execute(self):
-        target = self.interpreter.program.label_table2[self.args[0]]
+        target = self.interpreter.program.label_table[self.args[0]]
         if self.check_jump():
             self.interpreter.instruction_ptr = target
             self.interpreter.last_op_jmp = False
@@ -106,7 +106,7 @@ class JL(JumpOperator):
 
 class CALL(Operator):
     def execute(self):
-        target = self.interpreter.program.label_table2[self.args[0]]
+        target = self.interpreter.program.label_table[self.args[0]]
         self.interpreter.call_stack.append(self.interpreter.instruction_ptr)
         self.interpreter.instruction_ptr = target
 
@@ -139,28 +139,27 @@ class CMP(Operator):
 class MSG(Operator):
     def get_params(self):
         params = []
-        stack = ''
-        collect_literal = False
-        collect_register = False
-        for char in self.args:
-            if char == "'" and not collect_literal:
-                collect_literal = True
-            elif char == "'" and collect_literal:
-                collect_literal = False
-                params.append(''.join(stack))
-                stack = []
-            elif char == "," and not collect_register and not collect_literal:
-                collect_register = True
-            elif char == "," and collect_register and not collect_literal:
-                collect_register = False
-                params.append(str(self.interpreter.memory.registers[''.join(stack)]))
-                stack = []
-            elif collect_register and char != " ":
-                stack += char
-            elif collect_literal:
-                stack += char
-        if stack:
-            params.append(str(self.interpreter.memory.registers[''.join(stack)]))
+        i = 0
+        n = len(self.args)
+
+        while i < n:
+            if self.args[i] == "'":
+                i += 1
+                literal = ''
+                while i < n and self.args[i] != "'":
+                    literal += self.args[i]
+                    i += 1
+                i += 1
+                params.append(literal)
+            else:
+                register = ''
+                while i < n and self.args[i] != ',':
+                    register += self.args[i]
+                    i += 1
+                if register:
+                    params.append(str(self.interpreter.memory.registers[''.join(register)]))
+            while i < n and (self.args[i] == ',' or self.args[i] == ' '):
+                i += 1
         return params
 
     def execute(self):
@@ -200,15 +199,15 @@ OP_DICTIONARY = {
 class Program:
     def __init__(self, code, interpreter):
         self.interpreter = interpreter
-        self.instructions2, self.label_table2 = self.other_parse_code(code)
-    
+        self.instructions, self.label_table = self.other_parse_code(code)
+
     def other_parse_code(self, code:str) -> list[Operator]:
         instructions = []
         label_table = {}
-        
+
         removed_comments = [line.split(';')[0].strip() for line in code.splitlines()]
         lines = [line for line in removed_comments if line]
-        
+
         for ptr, line in enumerate(lines):
             if ':' in line:
                 name, args = line[:-1], []
@@ -219,7 +218,7 @@ class Program:
                 instructions.append(OP_DICTIONARY[name](name, args, self.interpreter))
             elif line.startswith('msg'):
                 name, args = line.split(maxsplit=1)
-                instructions.append(OP_DICTIONARY[name](name, args, self.interpreter))        
+                instructions.append(OP_DICTIONARY[name](name, args, self.interpreter))
             else:
                 name, args = line.split(maxsplit=1)
                 args = [arg.strip() for arg in args.split(',')]
@@ -263,19 +262,93 @@ class Interpreter:
             try:
                 self.last_op_jmp = False
 
-                current_op = self.program.instructions2[self.instruction_ptr]
+                current_op = self.program.instructions[self.instruction_ptr]
                 current_op.execute()
 
-                if debug: print(f'After executing {current_op}. \tRegisters: ' + str([f'{k}: {v}' for k, v in self.memory.registers.items()]) + f'\t Return: {str(self.memory.return_value)}')
+                if debug: print(f'After executing {current_op}. \tRegisters: ' +\
+                                 str([f'{k}: {v}' for k, v in self.memory.registers.items()]) +\
+                                      f'\t Stack: {str(self.call_stack)}')
 
                 if not self.last_op_jmp:
                     self.instruction_ptr += 1
 
             except IndexError:
+                if debug: print('Reached end of program without END instruction. Stopping.')
                 self.running = False
-                print('Reached end of program without END instruction. Stopping.')
+                self.memory.return_value = ['-1']
 
-program = """mov   a, 11           ; value1
+TESTS = [
+    
+("Any program...",
+'''
+; My first program
+mov  a, 5
+inc  a
+call function
+msg  '(5+1)/2 = ', a    ; output message
+end
+
+function:
+    div  a, 2
+    ret
+''', '(5+1)/2 = 3'),
+    
+
+("Factorial",
+'''
+mov   a, 5
+mov   b, a
+mov   c, a
+call  proc_fact
+call  print
+end
+
+proc_fact:
+    dec   b
+    mul   c, b
+    cmp   b, 1
+    jne   proc_fact
+    ret
+
+print:
+    msg   a, '! = ', c ; output text
+    ret
+''', '5! = 120'),
+
+("Fibonacci", '''
+mov   a, 8            ; value
+mov   b, 0            ; next
+mov   c, 0            ; counter
+mov   d, 0            ; first
+mov   e, 1            ; second
+call  proc_fib
+call  print
+end
+
+proc_fib:
+    cmp   c, 2
+    jl    func_0
+    mov   b, d
+    add   b, e
+    mov   d, e
+    mov   e, b
+    inc   c
+    cmp   c, a
+    jle   proc_fib
+    ret
+
+func_0:
+    mov   b, c
+    inc   c
+    jmp   proc_fib
+
+print:
+    msg   'Term ', a, ' of Fibonacci series is: ', b        ; output text
+    ret
+''', 'Term 8 of Fibonacci series is: 21'),
+
+('Modulo', '''
+mov   a, 11           ; value1
 mov   b, 3            ; value2
 call  mod_func
 msg   'mod(', a, ', ', b, ') = ', d        ; output
@@ -289,10 +362,10 @@ mod_func:
     mov   d, a        ; temp2
     sub   d, c
     ret
-"""
+''', 'mod(11, 3) = 2'),
 
-
-program2 = '''mov   a, 81         ; value1
+('gcd', '''
+mov   a, 81         ; value1
 mov   b, 153        ; value2
 call  init
 call  proc_gcd
@@ -337,61 +410,10 @@ b_abs:
 print:
     msg   'gcd(', a, ', ', b, ') = ', c
     ret
-'''
+''','gcd(81, 153) = 9'),
 
-program3 = '''
-mov   a, 5
-mov   b, a
-mov   c, a
-call  proc_fact
-call  print
-end
-
-proc_fact:
-    dec   b
-    mul   c, b
-    cmp   b, 1
-    jne   proc_fact
-    ret
-
-print:
-    msg   a, '! = ', c ; output text
-    ret
-'''
-
-fib = '''mov   a, 8            ; value
-mov   b, 0            ; next
-mov   c, 0            ; counter
-mov   d, 0            ; first
-mov   e, 1            ; second
-call  proc_fib
-call  print
-end
-
-proc_fib:
-    cmp   c, 2
-    jl    func_0
-    mov   b, d
-    add   b, e
-    mov   d, e
-    mov   e, b
-    inc   c
-    cmp   c, a
-    jle   proc_fib
-    ret
-
-func_0:
-    mov   b, c
-    inc   c
-    jmp   proc_fib
-
-print:
-    msg   'Term ', a, ' of Fibonacci series is: ', b        ; output text
-    ret
-
-'''
-
-fail = '''call  func1
+('Failing', '''
+call  func1
 call  print
 end
 
@@ -404,9 +426,41 @@ func2:
 
 print:
     msg 'This program should return -1'
-'''
+''', -1),
 
-i = Interpreter()
-i.load_code(fail)
-i.run_program(debug=True)
-print(''.join(i.memory.return_value))
+('Power', '''
+mov   a, 2            ; value1
+mov   b, 10           ; value2
+mov   c, a            ; temp1
+mov   d, b            ; temp2
+call  proc_func
+call  print
+end
+
+proc_func:
+    cmp   d, 1
+    je    continue
+    mul   c, a
+    dec   d
+    call  proc_func
+
+continue:
+    ret
+
+print:
+    msg a, '^', b, ' = ', c
+    ret
+''', '2^10 = 1024')
+]
+
+def tests():
+    for test in (TESTS[2],):
+        name, code, output = test
+        print(f'Testing program called {name}.')
+        comp = Interpreter()
+        comp.load_code(code)
+        comp.run_program(debug=True)
+        res = ''.join(comp.memory.return_value)
+        print(f'Expected: {output} Got: {res}. {output == res}')
+
+tests()
